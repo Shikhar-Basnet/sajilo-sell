@@ -16,3 +16,6 @@ class User(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # "seller" (default) or "admin". Enforced at the DB layer via a CHECK
+    # constraint (see migration) and at the API layer via require_role().
+    role: Mapped[str] = mapped_column(String(20), nullable=False, server_default="seller")

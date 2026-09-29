@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -15,4 +16,9 @@ class UserOut(BaseModel):
     id: uuid.UUID
     email: EmailStr
     is_active: bool
+    role: Literal["admin", "seller", "customer"]
     created_at: datetime
+
+
+class UserSetActiveRequest(BaseModel):
+    is_active: bool
