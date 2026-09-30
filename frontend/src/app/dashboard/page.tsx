@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, ApiError, clearTokens, isAuthenticated } from "@/lib/api";
+import { apiFetch, ApiError, isAuthenticated, logout } from "@/lib/api";
 import type { ProductOut, StoreOut, UserOut } from "@/lib/types";
 import { Spinner } from "@/components/Spinner";
 
@@ -38,8 +38,8 @@ export default function DashboardPage() {
     }
   }
 
-  function handleLogout() {
-    clearTokens();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 

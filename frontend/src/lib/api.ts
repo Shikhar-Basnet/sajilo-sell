@@ -37,6 +37,33 @@ export function clearTokens() {
   clearAuthCookie();
 }
 
+const SESSION_MESSAGE_KEY = "sajilo_session_message";
+
+/** Reads and clears the one-shot "why were you logged out" message, if any. */
+export function consumeSessionMessage(): string | null {
+  if (typeof window === "undefined") return null;
+  const msg = sessionStorage.getItem(SESSION_MESSAGE_KEY);
+  if (msg) sessionStorage.removeItem(SESSION_MESSAGE_KEY);
+  return msg;
+}
+
+/** Properly ends the session: revokes the refresh token server-side (so
+ * it can't be replayed later) and clears local state either way. */
+export async function logout(): Promise<void> {
+  const refreshToken = getRefreshToken();
+  clearTokens();
+  if (!refreshToken) return;
+  try {
+    await fetch("/api/v1/auth/logout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+  } catch {
+    // best-effort — client-side tokens are already cleared regardless
+  }
+}
+
 export function isAuthenticated(): boolean {
   return getAccessToken() !== null;
 }
@@ -60,6 +87,18 @@ async function refreshAccessToken(): Promise<string | null> {
   });
 
   if (!res.ok) {
+    // Surface *why* on the next login screen — e.g. "Session expired due
+    // to inactivity" vs. a generic failure — instead of silently bouncing.
+    let message = "Your session has expired. Please log in again.";
+    try {
+      const body = await res.json();
+      if (body?.detail) message = body.detail;
+    } catch {
+      // not JSON
+    }
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem(SESSION_MESSAGE_KEY, message);
+    }
     clearTokens();
     return null;
   }
