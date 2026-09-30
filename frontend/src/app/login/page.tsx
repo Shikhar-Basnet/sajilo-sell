@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, ApiError, consumeSessionMessage, setTokens } from "@/lib/api";
+import { apiFetch, ApiError, setTokens } from "@/lib/api";
 import type { TokenPair } from "@/lib/types";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(() => consumeSessionMessage());
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {

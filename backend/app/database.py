@@ -8,7 +8,14 @@ from app.config import settings
 # Postgres Row-Level Security policies are actually enforced for every
 # request. Migrations connect separately as the admin/table-owner role
 # (settings.DATABASE_URL) — see alembic/env.py. Never merge these two.
-engine = create_async_engine(settings.APP_DATABASE_URL, pool_pre_ping=True, echo=False)
+engine = create_async_engine(
+    settings.APP_DATABASE_URL,
+    pool_size=5,
+    max_overflow=5,       # 10 max, comfortably under Postgres max_connections=20
+    pool_recycle=1800,
+    pool_pre_ping=True,   # local round trip, cheap insurance
+    echo=False,
+)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False

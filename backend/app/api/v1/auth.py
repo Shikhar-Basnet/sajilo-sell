@@ -16,6 +16,8 @@ from app.core.security import (
     decode_token,
     hash_password,
     verify_password,
+    hash_password_async,
+    verify_password_async,
 )
 from app.database import get_db
 from app.models.refresh_token import RefreshToken
@@ -27,6 +29,20 @@ from app.schemas.user import UserCreate, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# backend/app/api/v1/auth.py
+from app.core.security import (
+    create_access_token, create_refresh_token, decode_token,
+    hash_password_async, verify_password_async,
+)
+
+def _token_pair(user: User) -> TokenPair:
+    # role/email are UI hints only. The backend still enforces roles on every request.
+    return TokenPair(
+        access_token=create_access_token(
+            subject=str(user.id), extra_claims={"role": user.role, "email": user.email}
+        ),
+        refresh_token=create_refresh_token(subject=str(user.id)),
+    )
 
 async def _issue_token_pair(db: AsyncSession, user_id: uuid.UUID) -> TokenPair:
     """
@@ -116,13 +132,11 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == payload.email))
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    if user is None or not await verify_password_async(payload.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
-
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled, please contact your administrator")
-
-    return await _issue_token_pair(db, user.id)
+    return _token_pair(user)
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -184,7 +198,7 @@ async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     stored.revoked_at = now
     await db.flush()
 
-    return await _issue_token_pair(db, user.id)
+    return _token_pair(user)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)

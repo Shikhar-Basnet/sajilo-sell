@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, ApiError, isAuthenticated, logout } from "@/lib/api";
-import type { ProductOut, StoreOut, UserOut } from "@/lib/types";
+import { apiFetch, ApiError, clearTokens, getTokenClaims, type TokenClaims } from "@/lib/api";
+import type { ProductOut, SellerDashboardOut, StoreOut, UserOut } from "@/lib/types";
 import { Spinner } from "@/components/Spinner";
 
 type MeState =
@@ -13,33 +13,21 @@ type MeState =
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [me, setMe] = useState<MeState>({ status: "loading" });
+  const [claims, setClaims] = useState<TokenClaims | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
+    const c = getTokenClaims();
+    // Tokens issued before this change have no role claim: log in once more.
+    if (!c || !c.role) {
+      clearTokens();
       router.replace("/login");
       return;
     }
-    loadMe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setClaims(c);
+  }, [router]);
 
-  async function loadMe() {
-    setMe({ status: "loading" });
-    try {
-      const user = await apiFetch<UserOut>("/v1/auth/me");
-      setMe({ status: "ready", user });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        router.replace("/login");
-      } else {
-        setMe({ status: "error", message: err instanceof ApiError ? err.message : "Failed to load your account." });
-      }
-    }
-  }
-
-  async function handleLogout() {
-    await logout();
+  function handleLogout() {
+    clearTokens();
     router.push("/login");
   }
 
@@ -53,29 +41,19 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {me.status === "loading" && <p className="text-gray-600">Loading...</p>}
-
-        {me.status === "error" && (
-          <div className="flex flex-col gap-3">
-            <p className="text-red-600">{me.message}</p>
-            <button onClick={loadMe} className="self-start bg-black text-white rounded-md px-4 py-2 text-sm font-medium">
-              Retry
-            </button>
-          </div>
-        )}
-
-        {me.status === "ready" && me.user.role === "seller" && <SellerDashboard />}
-        {me.status === "ready" && me.user.role === "admin" && <AdminDashboard />}
-        {me.status === "ready" && me.user.role === "customer" && <CustomerDashboard user={me.user} />}
+        {!claims && <p className="text-gray-600">Loading...</p>}
+        {claims?.role === "seller" && <SellerDashboard />}
+        {claims?.role === "admin" && <AdminDashboard />}
+        {claims?.role === "customer" && <CustomerDashboard email={claims.email ?? ""} />}
       </div>
     </main>
   );
 }
 
-function CustomerDashboard({ user }: { user: UserOut }) {
+function CustomerDashboard({ email }: { email: string }) {
   return (
     <div className="border border-gray-200 rounded-lg p-6 text-center">
-      <p className="text-gray-600 mb-4">Welcome, {user.email}.</p>
+      <p className="text-gray-600 mb-4">Welcome, {email}.</p>
       <a href="/browse" className="inline-block bg-black text-white rounded-md px-4 py-2 text-sm font-medium">
         Browse stores
       </a>
@@ -121,37 +99,21 @@ function SellerDashboard() {
   const [sFormError, setSFormError] = useState<string | null>(null);
   const [sSubmitting, setSSubmitting] = useState(false);
 
+
   useEffect(() => {
-    loadStore();
+    loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (view.status === "has-store") loadProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.status]);
-
-  async function loadStore() {
+  async function loadDashboard() {
     setView({ status: "loading" });
     try {
-      const store = await apiFetch<StoreOut>("/v1/stores/me");
-      setView({ status: "has-store", store });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setView({ status: "no-store" });
-      } else {
-        setView({ status: "error", message: err instanceof ApiError ? err.message : "Failed to load your store." });
-      }
-    }
-  }
-
-  async function loadProducts() {
-    try {
-      const items = await apiFetch<ProductOut[]>("/v1/products/me");
-      setProducts(items);
+      const data = await apiFetch<SellerDashboardOut>("/v1/dashboard/seller");
+      setProducts(data.products);
       setProductsError(null);
+      setView(data.store ? { status: "has-store", store: data.store } : { status: "no-store" });
     } catch (err) {
-      setProductsError(err instanceof ApiError ? err.message : "Failed to load products.");
+      setView({ status: "error", message: err instanceof ApiError ? err.message : "Failed to load your dashboard." });
     }
   }
 
@@ -165,6 +127,7 @@ function SellerDashboard() {
         body: JSON.stringify({ name, slug }),
       });
       setView({ status: "has-store", store });
+      setProducts([]);
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : "Failed to create store.");
     } finally {
@@ -291,7 +254,7 @@ function SellerDashboard() {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-red-600">{view.message}</p>
-        <button onClick={loadStore} className="self-start bg-black text-white rounded-md px-4 py-2 text-sm font-medium">
+        <button onClick={loadDashboard} className="self-start bg-black text-white rounded-md px-4 py-2 text-sm font-medium">
           Retry
         </button>
       </div>
@@ -371,7 +334,7 @@ function SellerDashboard() {
               <div className="flex justify-between"><dt className="text-gray-500">Created</dt><dd>{new Date(store.created_at).toLocaleDateString()}</dd></div>
             </dl>
             {store.status === "approved" && (
-              <a href={`/store/${store.slug}`} target="_blank" rel="noopener noreferrer" className="inline-block mt-4 text-sm text-black underline">
+              <a href={`/store?slug=${store.slug}`} target="_blank" rel="noopener noreferrer" className="inline-block mt-4 text-sm text-black underline">
                 View your storefront →
               </a>
             )}

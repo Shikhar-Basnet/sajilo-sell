@@ -1,6 +1,7 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status   # add Response
+from app.core.cache import set_public_cache
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,7 +107,8 @@ async def delete_product(
 
 
 @router.get("/by-store-slug/{slug}", response_model=list[ProductPublicOut])
-async def list_public_products(slug: str, db: AsyncSession = Depends(get_db)):
+async def list_public_products(slug: str, response: Response, db: AsyncSession = Depends(get_db)):
+    set_public_cache(response, s_maxage=30, swr=300)   # shorter: prices change more often
     """
     Public storefront listing — no auth required. Relies on the
     products_public_read RLS policy (is_active = true); no tenant

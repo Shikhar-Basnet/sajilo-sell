@@ -6,6 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+import time
 
 from app.core.security import decode_token
 from app.database import get_db
@@ -13,6 +14,11 @@ from app.models.store import Store
 from app.models.user import User
 
 bearer_scheme = HTTPBearer(auto_error=True)
+_USER_TTL = 20.0
+_user_cache: dict[uuid.UUID, tuple[float, User]] = {}
+
+def invalidate_user(user_id: uuid.UUID) -> None:
+    _user_cache.pop(user_id, None)
 
 
 async def get_current_user(
@@ -27,15 +33,24 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
 
-    user_id = payload.get("sub")
-    if not user_id:
+    sub = payload.get("sub")
+    if not sub:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
 
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id)))
+    uid = uuid.UUID(sub)
+    now = time.monotonic()
+    hit = _user_cache.get(uid)
+    if hit and hit[0] > now:
+        return hit[1]
+
+    result = await db.execute(select(User).where(User.id == uid))
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
+    if len(_user_cache) > 1000:
+        _user_cache.clear()
+    _user_cache[uid] = (now + _USER_TTL, user)
     return user
 
 

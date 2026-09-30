@@ -1,6 +1,18 @@
+// frontend/src/lib/api.ts
 const ACCESS_TOKEN_KEY = "sajilo_access_token";
 const REFRESH_TOKEN_KEY = "sajilo_refresh_token";
 const AUTH_COOKIE_NAME = "sajilo_authed";
+
+// "/api" while nginx serves everything on one origin; becomes
+// "https://api.shikharbasnet.com.np" in Step 6 via NEXT_PUBLIC_API_BASE.
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
+
+export interface TokenClaims {
+  sub: string;
+  role: "admin" | "seller" | "customer";
+  email?: string;
+  exp: number;
+}
 
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -12,15 +24,21 @@ export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
-// Non-httpOnly flag cookie, readable only by middleware, used purely for
-// routing decisions (redirect to /login before a protected page renders).
-// It carries no token material and grants no access on its own — the
-// backend still verifies the real JWT on every request.
-function setAuthCookie() {
-  // 7 days matches REFRESH_TOKEN_EXPIRE_DAYS on the backend.
-  document.cookie = `${AUTH_COOKIE_NAME}=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
+/** UI-only hint decoded from the JWT payload. NOT a security check. */
+export function getTokenClaims(): TokenClaims | null {
+  const token = getAccessToken();
+  if (!token) return null;
+  try {
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(b64)) as TokenClaims;
+  } catch {
+    return null;
+  }
 }
 
+function setAuthCookie() {
+  document.cookie = `${AUTH_COOKIE_NAME}=1; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
+}
 function clearAuthCookie() {
   document.cookie = `${AUTH_COOKIE_NAME}=; path=/; max-age=0`;
 }
@@ -37,33 +55,6 @@ export function clearTokens() {
   clearAuthCookie();
 }
 
-const SESSION_MESSAGE_KEY = "sajilo_session_message";
-
-/** Reads and clears the one-shot "why were you logged out" message, if any. */
-export function consumeSessionMessage(): string | null {
-  if (typeof window === "undefined") return null;
-  const msg = sessionStorage.getItem(SESSION_MESSAGE_KEY);
-  if (msg) sessionStorage.removeItem(SESSION_MESSAGE_KEY);
-  return msg;
-}
-
-/** Properly ends the session: revokes the refresh token server-side (so
- * it can't be replayed later) and clears local state either way. */
-export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  clearTokens();
-  if (!refreshToken) return;
-  try {
-    await fetch("/api/v1/auth/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-  } catch {
-    // best-effort — client-side tokens are already cleared regardless
-  }
-}
-
 export function isAuthenticated(): boolean {
   return getAccessToken() !== null;
 }
@@ -76,36 +67,32 @@ export class ApiError extends Error {
   }
 }
 
-async function refreshAccessToken(): Promise<string | null> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
+let refreshInFlight: Promise<string | null> | null = null;
 
-  const res = await fetch("/api/v1/auth/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return null;
+
+    const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) {
+      clearTokens();
+      return null;
+    }
+    const data = (await res.json()) as { access_token: string; refresh_token: string };
+    setTokens(data.access_token, data.refresh_token);
+    return data.access_token;
+  })().finally(() => {
+    refreshInFlight = null;
   });
 
-  if (!res.ok) {
-    // Surface *why* on the next login screen — e.g. "Session expired due
-    // to inactivity" vs. a generic failure — instead of silently bouncing.
-    let message = "Your session has expired. Please log in again.";
-    try {
-      const body = await res.json();
-      if (body?.detail) message = body.detail;
-    } catch {
-      // not JSON
-    }
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem(SESSION_MESSAGE_KEY, message);
-    }
-    clearTokens();
-    return null;
-  }
-
-  const data = (await res.json()) as { access_token: string; refresh_token: string };
-  setTokens(data.access_token, data.refresh_token);
-  return data.access_token;
+  return refreshInFlight;
 }
 
 interface ApiFetchOptions extends RequestInit {
@@ -116,10 +103,12 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   const { auth = true, headers, ...rest } = options;
 
   const doFetch = (token: string | null) =>
-    fetch(`/api${path}`, {
+    fetch(`${API_BASE}${path}`, {
       ...rest,
       headers: {
-        "Content-Type": "application/json",
+        // Only send Content-Type when there is a body: keeps public GETs
+        // "simple" cross-origin requests (no CORS preflight round trip).
+        ...(rest.body ? { "Content-Type": "application/json" } : {}),
         ...(headers || {}),
         ...(auth && token ? { Authorization: `Bearer ${token}` } : {}),
       },
@@ -129,9 +118,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
 
   if (auth && res.status === 401) {
     const newToken = await refreshAccessToken();
-    if (newToken) {
-      res = await doFetch(newToken);
-    }
+    if (newToken) res = await doFetch(newToken);
   }
 
   if (!res.ok) {
@@ -145,8 +132,6 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
     throw new ApiError(res.status, detail);
   }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

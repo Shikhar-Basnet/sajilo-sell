@@ -24,7 +24,7 @@ export default function BrowsePage() {
         <ul className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {stores?.map((store) => (
             <li key={store.slug} className="border border-gray-200 rounded-lg p-4">
-              <a href={`/store/${store.slug}`} className="font-semibold underline">{store.name}</a>
+              <a href={`/store?slug=${store.slug}`} className="font-semibold underline">{store.name}</a>
               {store.description && <p className="text-sm text-gray-600 mt-1">{store.description}</p>}
             </li>
           ))}

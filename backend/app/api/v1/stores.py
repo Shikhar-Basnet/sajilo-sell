@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status   # add Response
+from app.core.cache import set_public_cache
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,9 +99,8 @@ async def update_my_store(
 
 
 @router.get("", response_model=list[StorePublicOut])
-async def list_public_stores(db: AsyncSession = Depends(get_db)):
-    """Public storefront directory — approved stores only, enforced by
-    both this explicit filter and the stores_public_read RLS policy."""
+async def list_public_stores(response: Response, db: AsyncSession = Depends(get_db)):
+    set_public_cache(response, s_maxage=60, swr=600)
     result = await db.execute(
         select(Store).where(Store.status == "approved").order_by(Store.created_at.desc())
     )
@@ -108,10 +108,8 @@ async def list_public_stores(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/by-slug/{slug}", response_model=StorePublicOut)
-async def get_store_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
-    """Public lookup — no auth required. A pending or rejected store
-    404s here even for a visitor who knows the exact slug, since
-    stores_public_read only permits SELECT on status='approved' rows."""
+async def get_store_by_slug(slug: str, response: Response, db: AsyncSession = Depends(get_db)):
+    set_public_cache(response, s_maxage=60, swr=600)
     result = await db.execute(select(Store).where(Store.slug == slug))
     store = result.scalar_one_or_none()
     if store is None:

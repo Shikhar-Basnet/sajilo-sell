@@ -51,3 +51,8 @@ export interface ProductPublicOut {
   description: string | null;
   price_cents: number;
 }
+
+export interface SellerDashboardOut {
+  store: StoreOut | null;
+  products: ProductOut[];
+}

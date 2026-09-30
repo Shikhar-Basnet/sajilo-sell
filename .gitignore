@@ -16,3 +16,8 @@ venv/
 
 # OS
 .DS_Store
+
+frontend/out/
+frontend/.next/
+*.tsbuildinfo
+next-env.d.ts

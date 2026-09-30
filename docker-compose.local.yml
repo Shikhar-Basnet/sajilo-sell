@@ -1,18 +1,9 @@
+# docker-compose.local.yml
 services:
   postgres:
     image: postgres:16-alpine
     container_name: sajilo-postgres
     restart: unless-stopped
-    mem_limit: 350m
-    command: >
-      postgres
-      -c shared_buffers=128MB
-      -c effective_cache_size=384MB
-      -c work_mem=4MB
-      -c maintenance_work_mem=32MB
-      -c max_connections=20
-      -c wal_compression=on
-      -c checkpoint_completion_target=0.9
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sajilo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sajilo_password}
@@ -31,15 +22,17 @@ services:
     build: ./backend
     container_name: sajilo-backend
     restart: unless-stopped
-    mem_limit: 300m
     env_file:
       - ./backend/.env
+    # Local only: auto-reload when you edit Python files
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
+      - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
 
 volumes:

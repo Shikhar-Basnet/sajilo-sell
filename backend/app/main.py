@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import ORJSONResponse
 
 from app.api.v1 import api_router
 from app.config import settings
@@ -22,6 +23,7 @@ tags_metadata = [
     {"name": "stores", "description": "Store creation and lookup, including the public by-slug storefront endpoint."},
     {"name": "products", "description": "Product management for store owners, and public product listings."},
     {"name": "admin", "description": "Admin-only endpoints, gated by role-based access control."},
+    {"name": "dashboard", "description": "Aggregated dashboard payloads."},
 ]
 
 app = FastAPI(
@@ -32,18 +34,16 @@ app = FastAPI(
     docs_url="/docs" if _docs_enabled else None,
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
+    default_response_class=ORJSONResponse,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://shikharbasnet.com.np",
-        "https://www.shikharbasnet.com.np",
-        "http://localhost:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    max_age=86400,
 )
 
 app.include_router(api_router, prefix="/v1")

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { isAuthenticated } from "@/lib/api";
+import { API_BASE, isAuthenticated } from "@/lib/api";
 
 export default function Home() {
   const [status, setStatus] = useState<string>("Checking backend...");
@@ -10,7 +10,7 @@ export default function Home() {
 
   useEffect(() => {
     setAuthed(isAuthenticated());
-    fetch("/api/health")
+    fetch(`${API_BASE}/health`)
       .then((res) => res.json())
       .then((data) =>
         setStatus(`Backend response: ${data.status} (${data.service})`)

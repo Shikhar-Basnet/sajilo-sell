@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_db, require_role, set_admin_context
+from app.api.deps import get_admin_db, require_role, set_admin_context, invalidate_user
 from app.core.audit import log_action
 from app.database import get_db
 from app.models.audit_log import AuditLog
@@ -122,6 +122,7 @@ async def set_user_active(
         actor_id=str(admin.id), changes={"is_active": payload.is_active},
     )
     await db.commit()
+    invalidate_user(user.id)
     await db.refresh(user)
     return user
 
